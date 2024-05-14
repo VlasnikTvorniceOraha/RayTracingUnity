@@ -1,0 +1,19 @@
+#include "HLSLSupport.cginc"
+#include "UnityRaytracingMeshUtils.cginc"
+#include "UnityShaderVariables.cginc"
+
+RaytracingAccelerationStructure _RaytracingAccelerationStructure : register(t0);
+
+float4x4 _CameraToWorld;
+float4x4 _InverseProjection;
+
+[shader("raygeneration")]
+void MyRayGenerationShader()
+{
+    uint3 dispatchId = DispatchRaysIndex();
+    uint3 dispatchDim = DispatchRaysDimensions();
+
+    // somehow get the world space position of the pixel we care about
+    // somehow generate a ray from that pixel in a meaningful Direction
+    // color the pixel we care about, with the information that ray gathered
+}

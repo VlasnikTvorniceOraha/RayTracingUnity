@@ -1,0 +1,500 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture2D<float4> Result;
+
+float Resolution;
+
+float3 cameraPos;
+
+float4 ambientLight;
+
+static const float PI = 3.14159265f;
+
+float3 sceneLightPos;
+float4 sceneLightIntensity;
+
+float4x4 _CameraToWorldMatrix;
+float4x4 _CameraInverseProjectionMatrix;
+
+struct RayTracingMaterial {
+	float4 ambientColor;
+	float4 diffuseColor;
+	float4 specularColor;
+	float specularFactor;
+	float indeksLoma;
+	float reflectionCoef;
+	float refractionCoef;
+};
+
+struct Sphere {
+    float radius;
+    float3 position;
+	RayTracingMaterial material;
+};
+
+struct HitInfo {
+    bool didHit;
+	float distance;
+	float3 hitPoint;
+	float3 normal;
+	RayTracingMaterial material;
+};
+
+RWStructuredBuffer<Sphere> spheres;
+
+
+
+struct Ray {
+    float3 origin;
+    float3 direction;
+	float3 energy;
+};
+
+Ray CreateCameraRay(float2 uv) 
+{
+	Ray newRay;
+    float3 origin = mul(_CameraToWorldMatrix, float4(0.0f, 0.0f, 0.0f, 1.0f)).xyz;
+    newRay.origin = origin;
+    float3 direction = mul(_CameraInverseProjectionMatrix, float4(uv, 0.0f, 1.0f)).xyz;
+    direction = mul(_CameraToWorldMatrix, float4(direction, 0.0f)).xyz;
+    direction = normalize(direction);
+	newRay.direction = direction;
+	newRay.energy = (1.0, 1.0, 1.0);
+    
+    return newRay;
+}
+
+
+int pogodioPozadinu = 0;
+int blackWhite;
+int ambient;
+int diffuse;
+int specular;
+int reflection;
+int refraction;
+int shadows;
+int blinnPhong;
+int blackBackground;
+
+int bounceNumber;
+
+
+
+
+
+
+//RWStructuredBuffer<Ray> generatedRays;
+
+HitInfo RaySphereIntersection(Ray ray, Sphere sphere) {
+    HitInfo hitInfo = (HitInfo)0;
+    float3 sphereCentre = sphere.position;
+    float sphereRadius = sphere.radius;
+    float3 offsetRayOrigin = ray.origin - sphereCentre;
+	// From the equation: sqrLength(rayOrigin + rayDir * dst) = radius^2
+	// Solving for dst results in a quadratic equation with coefficients:
+	float a = dot(ray.direction, ray.direction); // a = 1 (assuming unit vector)
+	float b = 2 * dot(offsetRayOrigin, ray.direction);
+	float c = dot(offsetRayOrigin, offsetRayOrigin) - sphereRadius * sphereRadius;
+	// Quadratic discriminant
+	float discriminant = b * b - 4 * a * c; 
+
+	// No solution when d < 0 (ray misses sphere)
+	if (discriminant >= 0) {
+	    // Distance to nearest intersection point (from quadratic formula)
+		float distance = (-b - sqrt(discriminant)) / (2 * a);
+
+		// Ignore intersections that occur behind the ray
+		if (distance >= 0) {
+			hitInfo.didHit = true;
+			hitInfo.distance = distance;
+			hitInfo.hitPoint = ray.origin + ray.direction * distance;
+			hitInfo.normal = normalize(hitInfo.hitPoint - sphereCentre);
+			hitInfo.material = sphere.material;
+			
+		}
+	}
+	
+    return hitInfo;
+}
+
+HitInfo CalculateRayCollision(Ray ray) {
+	HitInfo closestHit = (HitInfo)0;
+	// We haven't hit anything yet, so 'closest' hit is infinitely far away
+	closestHit.distance = 1.#INF;
+
+	uint brojSfera;
+	uint stride;
+
+	spheres.GetDimensions(brojSfera, stride);
+
+	// Raycast against all spheres and keep info about the closest hit
+	for (int i = 0; i < brojSfera; i++)
+	{
+		Sphere trenutnaSfera = spheres[i];
+		HitInfo hitInfo = RaySphereIntersection(ray, trenutnaSfera);
+
+		if (hitInfo.didHit && hitInfo.distance < closestHit.distance)
+		{
+			closestHit = hitInfo;
+		}
+	}
+
+	return closestHit;
+}
+
+float3 getReflectedVector(Ray ray, float3 normala) {
+	float3 U = -ray.direction;
+	float3 N = normala;
+	float3 reflektiraniVektor = (dot(2 * U, N)) * N - U;
+	return reflektiraniVektor;
+}
+
+int Shading(HitInfo hitInfo) {
+
+	Ray shaderRay;
+
+	shaderRay.origin = hitInfo.hitPoint;
+
+	shaderRay.direction = sceneLightPos - hitInfo.hitPoint;
+	shaderRay.direction = normalize(shaderRay.direction);
+
+	HitInfo shaderRayHitInfo = CalculateRayCollision(shaderRay);
+
+	if (shaderRayHitInfo.didHit) {
+		//ima sjenu
+		return 1;
+	} else {
+		return 0;
+	}
+
+}
+
+float3 ambientLighting(HitInfo hitInfo) {
+	float3 ambijentalniDoprinos = float3(
+					hitInfo.material.ambientColor.x * ambientLight.x, 
+					hitInfo.material.ambientColor.y * ambientLight.y, 
+					hitInfo.material.ambientColor.z * ambientLight.z);
+
+	
+	return ambijentalniDoprinos;
+}
+
+float3 diffuseLighting(HitInfo hitInfo) {
+
+	if (shadows) {
+		int shading = Shading(hitInfo);
+
+		if (shading == 1) {
+			return float3(0.0, 0.0, 0.0);
+		}
+	}
+	
+
+	float3 L = sceneLightPos - hitInfo.hitPoint;
+	L = normalize(L);
+
+	float3 difuzniDoprinos = float3(
+	sceneLightIntensity.x * hitInfo.material.diffuseColor.x * max(dot(L, hitInfo.normal), 0), 
+	sceneLightIntensity.y * hitInfo.material.diffuseColor.y * max(dot(L, hitInfo.normal), 0), 
+	sceneLightIntensity.z * hitInfo.material.diffuseColor.z * max(dot(L, hitInfo.normal), 0));
+
+	return difuzniDoprinos;
+
+}
+
+float3 specularLighting(HitInfo hitInfo) {
+
+	if (shadows) {
+		int shading = Shading(hitInfo);
+
+		if (shading == 1) {
+			return float3(0.0, 0.0, 0.0);
+		}
+	}
+
+
+	float3 L = sceneLightPos - hitInfo.hitPoint;
+	L = normalize(L);
+
+	float3 V = cameraPos - hitInfo.hitPoint;
+	V = normalize(V);
+
+	float3 U = L;
+	U = normalize(U);
+	float3 N = hitInfo.normal;
+	N = normalize(N);
+	float3 R = (dot(2 * U, N)) * N - U;
+	R = normalize(R);
+
+	float3 spekularniDoprinos = float3(
+	sceneLightIntensity.x * hitInfo.material.specularColor.x * pow(max(dot(R, V), 0) , hitInfo.material.specularFactor), 
+	sceneLightIntensity.y * hitInfo.material.specularColor.y * pow(max(dot(R, V), 0), hitInfo.material.specularFactor), 
+	sceneLightIntensity.z * hitInfo.material.specularColor.z * pow(max(dot(R, V), 0), hitInfo.material.specularFactor));
+
+	return spekularniDoprinos;
+
+}
+
+float3 blinnPhongSpecularLighting(HitInfo hitInfo) {
+	if (shadows) {
+		int shading = Shading(hitInfo);
+
+		if (shading == 1) {
+			return float3(0.0, 0.0, 0.0);
+		}
+	}
+
+
+	float3 L = sceneLightPos - hitInfo.hitPoint;
+	L = normalize(L);
+
+	float3 V = cameraPos - hitInfo.hitPoint;
+	V = normalize(V);
+
+	float3 halfwayDir = normalize(L + V);
+
+	float3 N = hitInfo.normal;
+	N = normalize(N);
+
+	float3 spekularniDoprinos = float3(
+	sceneLightIntensity.x * hitInfo.material.specularColor.x * pow(max(dot(N, halfwayDir), 0) , hitInfo.material.specularFactor), 
+	sceneLightIntensity.y * hitInfo.material.specularColor.y * pow(max(dot(N, halfwayDir), 0), hitInfo.material.specularFactor), 
+	sceneLightIntensity.z * hitInfo.material.specularColor.z * pow(max(dot(N, halfwayDir), 0), hitInfo.material.specularFactor));
+
+	return spekularniDoprinos;
+}
+
+float3 PhongShading(Ray ray) {
+
+	float3 phongBoja = float3(0.0, 0.0, 0.0);
+	pogodioPozadinu = 0;
+
+	HitInfo hitInfo = CalculateRayCollision(ray);
+
+	if (hitInfo.didHit) {
+
+		if (blackWhite) {
+			return float3(1.0, 1.0, 1.0);
+		}
+
+		//izracunaj phong osvijetljenje
+
+		if (ambient) {
+			float3 ambijentalniDoprinos = ambientLighting(hitInfo);
+			phongBoja += ambijentalniDoprinos;
+		}
+		
+
+		if (diffuse) {
+			float3 difuzniDoprinos = diffuseLighting(hitInfo);
+			phongBoja += difuzniDoprinos;
+		}
+		
+		if (specular) {
+			float3 spekularniDoprinos;
+			if (blinnPhong) {
+				spekularniDoprinos = blinnPhongSpecularLighting(hitInfo);
+			} else {
+				spekularniDoprinos = specularLighting(hitInfo);
+			}
+			
+			phongBoja += spekularniDoprinos;
+		}
+		
+	} else if (blackBackground || blackWhite) {
+		return float3(0.0, 0.0, 0.0);
+	} else {
+		pogodioPozadinu = 1;
+	}
+
+	return phongBoja;
+
+}
+
+Ray CalculateReflectedRay(Ray ray, HitInfo hitInfo, float reflectionCoef) {
+
+	Ray reflectedRay = ray;
+	float3 originRef = hitInfo.hitPoint;
+
+	reflectedRay.origin = originRef;
+	reflectedRay.energy = float3(1.0, 1.0, 1.0);
+
+	float3 U = -ray.direction;
+	U = normalize(U);
+
+	float3 N = hitInfo.normal;
+	N = normalize(N);
+
+	float3 directionRef = (dot(2 * U, N)) * N - U;
+
+	reflectedRay.direction = directionRef;
+				
+	reflectedRay.energy *= reflectionCoef;
+
+	return reflectedRay;
+
+}
+
+Ray CalculateRefractedRay(Ray ray, HitInfo hitInfo, float refractionCoef) {
+	Ray refractedRay = ray;
+	float3 U = ray.origin - hitInfo.hitPoint;
+	U = normalize(U);
+	float alfa;
+	float cosA;
+	float a;
+	float D;
+	alfa = acos(dot(U, hitInfo.normal) / (length(U) * length(hitInfo.normal)));
+	cosA = cos(alfa);
+	cosA = (cosA * 180.0 / PI);
+
+	D = 4 * (hitInfo.material.indeksLoma * hitInfo.material.indeksLoma * cosA * cosA - hitInfo.material.indeksLoma * hitInfo.material.indeksLoma + 1);
+
+	a = (-2 * hitInfo.material.indeksLoma * cosA + sqrt(D)) / 2;
+
+	float3 R = -a * hitInfo.normal - hitInfo.material.indeksLoma * U;
+	R = normalize(R);
+
+	refractedRay.origin = hitInfo.hitPoint;
+	refractedRay.direction = R;
+	refractedRay.energy *= refractionCoef;
+
+	return refractedRay;
+
+}
+
+
+
+float3 TraceRay(Ray ray, int dubina, int type) {
+
+	//type = 0 -> reflection
+	//type = 1 -> refraction
+	float3 tracedColor = float3(0.0, 0.0, 0.0);
+	HitInfo hitInfo = CalculateRayCollision(ray);
+
+	
+
+	if (type == 0 && hitInfo.didHit) {
+		//za prvu kuglu koju je pogodio sacuvaj koeficijent
+		float reflectionCoefMat = hitInfo.material.reflectionCoef;
+		//izracunaj reflektiranu zraku od zadane u funkciji
+		Ray reflectedRay = CalculateReflectedRay(ray, hitInfo, reflectionCoefMat);
+
+		//sada posalji reflektiranu zraku u loop sa dubinom i traceaj
+
+		for (int bounceIndex = 0; bounceIndex < dubina; bounceIndex++) {
+	
+			hitInfo = CalculateRayCollision(reflectedRay);
+
+			if (hitInfo.didHit) {
+				//izracunaj phong za tu tocku i idi dalje
+				float3 phong = PhongShading(reflectedRay);
+
+				tracedColor += phong * reflectedRay.energy;
+
+				//reflektiraj zraku opet
+
+				reflectedRay = CalculateReflectedRay(reflectedRay, hitInfo, reflectionCoefMat);
+			} else {
+				return tracedColor;
+			}
+			
+
+		}
+
+		
+
+		} else if (type == 1) {
+			//refrakcijska zraka
+			float refractionCoefMat = hitInfo.material.refractionCoef;
+			Ray refractedRay = CalculateRefractedRay(ray, hitInfo, refractionCoefMat);
+
+			//loop
+
+			for (int bounceIndex = 0; bounceIndex < dubina; bounceIndex++) {
+	
+				hitInfo = CalculateRayCollision(refractedRay);
+
+				if (hitInfo.didHit) {
+					//izracunaj phong za tu tocku i idi dalje
+					float3 phong = PhongShading(refractedRay);
+
+					tracedColor += phong * refractedRay.energy;
+
+					//reflektiraj zraku opet
+
+					refractedRay = CalculateReflectedRay(refractedRay, hitInfo, refractionCoefMat);
+				} else {
+					return tracedColor;
+			}
+		}
+
+		
+
+
+	}
+
+	return tracedColor;
+
+
+
+}
+
+
+[numthreads(8,8,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    //na temelju piksela i objekata u sceni treba izracunati doprinose zraka
+
+	float3 sveukupnaBoja = float3(0.0, 0.0, 0.0);
+
+
+	//raytracing Dio
+    //izracunaj zraku iz piksela
+	uint width, height;
+    Result.GetDimensions(width, height);
+	float2 uv = float2((id.xy + float2(0.5f, 0.5f)) / float2(width, height) * 2.0f - 1.0f);
+
+    Ray trenutniRay = CreateCameraRay(uv);
+    //trenutniRay.origin = cameraPos;
+    //izracunaj smjer zrake
+    //trenutniRay.direction = Result[id.xy].xyz - cameraPos;
+
+	//phong shading
+	float3 phongColor = PhongShading(trenutniRay);
+	sveukupnaBoja += phongColor;
+
+	//ray tracing zraka dio
+	if (reflection) {
+		//izracunaj reflektiranu zraku od originalne
+		
+		float3 tracedReflectionColor = TraceRay(trenutniRay, bounceNumber, 0);
+		sveukupnaBoja += tracedReflectionColor;
+	}
+
+	if (refraction) {
+
+		float3 tracedRefractionColor = TraceRay(trenutniRay, bounceNumber, 1);
+		sveukupnaBoja += tracedRefractionColor;
+
+	}
+	
+
+	if (pogodioPozadinu == 1) {
+		Result[id.xy] = float4(Result[id.xy].x, Result[id.xy].y, Result[id.xy].z, 0.0);
+	} else{
+		Result[id.xy] = float4(sveukupnaBoja.x, sveukupnaBoja.y, sveukupnaBoja.z, 0.0);
+	}
+		
+	
+
+	
+	
+
+    //Result[id.xy] = float4(Result[id.xy].x, Result[id.xy].y, Result[id.xy].z, 0.0);
+    //Result[id.xy] = Result[id.xy];
+}
+
