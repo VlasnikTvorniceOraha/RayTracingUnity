@@ -5,7 +5,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 
-public class ComputeShaderTest : MonoBehaviour
+public class RayTracingComputeShader : MonoBehaviour
 {
     public ComputeShader computeShader;
 
@@ -190,6 +190,10 @@ public class ComputeShaderTest : MonoBehaviour
             computeShader.SetVector("ambientLight", ambientColor);
             computeShader.SetVector("sceneLightPos", sceneLight.position);
             computeShader.SetVector("sceneLightIntensity", sceneLight.intensity);
+
+            computeShader.SetVector("cameraPos", Camera.main.transform.position);
+            computeShader.SetMatrix("_CameraToWorldMatrix", Camera.main.cameraToWorldMatrix);
+            computeShader.SetMatrix("_CameraInverseProjectionMatrix", Camera.main.projectionMatrix.inverse);
             if (renderTexture == null) {
                 
                 renderTexture = new RenderTexture(src.width, src.height, src.depth);

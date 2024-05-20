@@ -42,6 +42,7 @@ struct HitInfo {
 	float3 hitPoint;
 	float3 normal;
 	RayTracingMaterial material;
+	Sphere sphere;
 };
 
 RWStructuredBuffer<Sphere> spheres;
@@ -108,12 +109,14 @@ HitInfo RaySphereIntersection(Ray ray, Sphere sphere) {
 		float distance = (-b - sqrt(discriminant)) / (2 * a);
 
 		// Ignore intersections that occur behind the ray
-		if (distance >= 0) {
+		if (distance > 0) {
 			hitInfo.didHit = true;
 			hitInfo.distance = distance;
 			hitInfo.hitPoint = ray.origin + ray.direction * distance;
 			hitInfo.normal = normalize(hitInfo.hitPoint - sphereCentre);
 			hitInfo.material = sphere.material;
+			hitInfo.sphere.position = sphere.position;
+			hitInfo.sphere.radius = sphere.radius;
 			
 		}
 	}
@@ -121,7 +124,7 @@ HitInfo RaySphereIntersection(Ray ray, Sphere sphere) {
     return hitInfo;
 }
 
-HitInfo CalculateRayCollision(Ray ray) {
+HitInfo CalculateRayCollision(Ray ray, HitInfo hitInfoPrevious) {
 	HitInfo closestHit = (HitInfo)0;
 	// We haven't hit anything yet, so 'closest' hit is infinitely far away
 	closestHit.distance = 1.#INF;
@@ -135,6 +138,13 @@ HitInfo CalculateRayCollision(Ray ray) {
 	for (int i = 0; i < brojSfera; i++)
 	{
 		Sphere trenutnaSfera = spheres[i];
+		if (hitInfoPrevious.distance != 0) {
+			//postoji i ignoriraj ako je ista sfera
+			if (trenutnaSfera.position.x == hitInfoPrevious.sphere.position.x && trenutnaSfera.position.y == hitInfoPrevious.sphere.position.y && trenutnaSfera.position.z == hitInfoPrevious.sphere.position.z) {
+				continue;
+			}
+		}
+		
 		HitInfo hitInfo = RaySphereIntersection(ray, trenutnaSfera);
 
 		if (hitInfo.didHit && hitInfo.distance < closestHit.distance)
@@ -162,7 +172,7 @@ int Shading(HitInfo hitInfo) {
 	shaderRay.direction = sceneLightPos - hitInfo.hitPoint;
 	shaderRay.direction = normalize(shaderRay.direction);
 
-	HitInfo shaderRayHitInfo = CalculateRayCollision(shaderRay);
+	HitInfo shaderRayHitInfo = CalculateRayCollision(shaderRay, (HitInfo)0);
 
 	if (shaderRayHitInfo.didHit) {
 		//ima sjenu
@@ -268,12 +278,13 @@ float3 blinnPhongSpecularLighting(HitInfo hitInfo) {
 	return spekularniDoprinos;
 }
 
-float3 PhongShading(Ray ray) {
+
+float3 PhongShading(Ray ray, HitInfo hitInfoPrevious) {
 
 	float3 phongBoja = float3(0.0, 0.0, 0.0);
 	pogodioPozadinu = 0;
 
-	HitInfo hitInfo = CalculateRayCollision(ray);
+	HitInfo hitInfo = CalculateRayCollision(ray, hitInfoPrevious);
 
 	if (hitInfo.didHit) {
 
@@ -339,6 +350,19 @@ Ray CalculateReflectedRay(Ray ray, HitInfo hitInfo, float reflectionCoef) {
 
 }
 
+float3 calcRefractDir(Ray ray, HitInfo hitInfo, float refractionCoef) {
+
+	float cosi = dot(ray.direction, hitInfo.normal); 
+    float n1 = 1, n2 = refractionCoef; 
+    float3 N = hitInfo.normal; 
+    if (cosi < 0) { cosi = -cosi; } else { n1 = n2; n2 = 1; N = -N; } 
+    float n = hitInfo.material.indeksLoma; 
+    float k = 1 - n * n * (1 - cosi * cosi);     
+    
+    return k < 0? float3(0.0, 0.0, 0.0) : n * ray.direction + N * n * cosi - N * sqrt(k); 
+
+}
+
 Ray CalculateRefractedRay(Ray ray, HitInfo hitInfo, float refractionCoef) {
 	Ray refractedRay = ray;
 	float3 U = ray.origin - hitInfo.hitPoint;
@@ -356,6 +380,7 @@ Ray CalculateRefractedRay(Ray ray, HitInfo hitInfo, float refractionCoef) {
 	a = (-2 * hitInfo.material.indeksLoma * cosA + sqrt(D)) / 2;
 
 	float3 R = -a * hitInfo.normal - hitInfo.material.indeksLoma * U;
+	//float3 R = calcRefractDir(ray, hitInfo, refractionCoef);
 	R = normalize(R);
 
 	refractedRay.origin = hitInfo.hitPoint;
@@ -368,12 +393,15 @@ Ray CalculateRefractedRay(Ray ray, HitInfo hitInfo, float refractionCoef) {
 
 
 
+
+
 float3 TraceRay(Ray ray, int dubina, int type) {
 
 	//type = 0 -> reflection
 	//type = 1 -> refraction
 	float3 tracedColor = float3(0.0, 0.0, 0.0);
-	HitInfo hitInfo = CalculateRayCollision(ray);
+	HitInfo hitInfo = CalculateRayCollision(ray, (HitInfo)0);
+	HitInfo hitInfoPrevious;
 
 	
 
@@ -386,12 +414,14 @@ float3 TraceRay(Ray ray, int dubina, int type) {
 		//sada posalji reflektiranu zraku u loop sa dubinom i traceaj
 
 		for (int bounceIndex = 0; bounceIndex < dubina; bounceIndex++) {
+
+			hitInfoPrevious = hitInfo;
 	
-			hitInfo = CalculateRayCollision(reflectedRay);
+			hitInfo = CalculateRayCollision(reflectedRay, hitInfoPrevious);
 
 			if (hitInfo.didHit) {
 				//izracunaj phong za tu tocku i idi dalje
-				float3 phong = PhongShading(reflectedRay);
+				float3 phong = PhongShading(reflectedRay, hitInfoPrevious);
 
 				tracedColor += phong * reflectedRay.energy;
 
@@ -407,26 +437,31 @@ float3 TraceRay(Ray ray, int dubina, int type) {
 
 		
 
-		} else if (type == 1) {
+		} else if (type == 1 && hitInfo.didHit) {
 			//refrakcijska zraka
 			float refractionCoefMat = hitInfo.material.refractionCoef;
 			Ray refractedRay = CalculateRefractedRay(ray, hitInfo, refractionCoefMat);
+			
 
 			//loop
 
 			for (int bounceIndex = 0; bounceIndex < dubina; bounceIndex++) {
-	
-				hitInfo = CalculateRayCollision(refractedRay);
+				
+				hitInfoPrevious = hitInfo;
 
-				if (hitInfo.didHit) {
+				//hitInfo = CalculateRayCollision(refractedRay);
+				hitInfo = CalculateRayCollision(refractedRay, hitInfoPrevious);
+
+				if (hitInfo.didHit && length(refractedRay.energy) > 0.1) {
 					//izracunaj phong za tu tocku i idi dalje
-					float3 phong = PhongShading(refractedRay);
+					float3 phong = PhongShading(refractedRay, hitInfoPrevious);
 
 					tracedColor += phong * refractedRay.energy;
+					//tracedColor = float3(1.0, 0.0, 0.0);
 
-					//reflektiraj zraku opet
+					//reflektiraj zraku opet 
 
-					refractedRay = CalculateReflectedRay(refractedRay, hitInfo, refractionCoefMat);
+					refractedRay = CalculateRefractedRay(refractedRay, hitInfo, hitInfo.material.refractionCoef);
 				} else {
 					return tracedColor;
 			}
@@ -464,7 +499,7 @@ void CSMain (uint3 id : SV_DispatchThreadID)
     //trenutniRay.direction = Result[id.xy].xyz - cameraPos;
 
 	//phong shading
-	float3 phongColor = PhongShading(trenutniRay);
+	float3 phongColor = PhongShading(trenutniRay, (HitInfo)0);
 	sveukupnaBoja += phongColor;
 
 	//ray tracing zraka dio
@@ -485,6 +520,7 @@ void CSMain (uint3 id : SV_DispatchThreadID)
 
 	if (pogodioPozadinu == 1) {
 		Result[id.xy] = float4(Result[id.xy].x, Result[id.xy].y, Result[id.xy].z, 0.0);
+		
 	} else{
 		Result[id.xy] = float4(sveukupnaBoja.x, sveukupnaBoja.y, sveukupnaBoja.z, 0.0);
 	}
