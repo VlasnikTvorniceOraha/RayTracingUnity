@@ -68,27 +68,25 @@ public class RayTracingComputeShader : MonoBehaviour
     // Start is called before the first frame update
     void Start()
     {
-        //kamera stvari test
-
+        //sjenčaru se šalju potrebne varijable prije pokretanja (dispatchanja)
+        //matrice vezane uz kameru
         computeShader.SetMatrix("_CameraToWorldMatrix", Camera.main.cameraToWorldMatrix);
         computeShader.SetMatrix("_CameraInverseProjectionMatrix", Camera.main.projectionMatrix.inverse);
 
-        //posalji poziciju kamere u sjencar
+        //posalji poziciju kamere u sjenčar
         computeShader.SetVector("cameraPos", Camera.main.transform.position);
 
         //postavi ambijentalno svijetlo
-
         computeShader.SetVector("ambientLight", ambientColor);
 
-        //postavi svijetlo svijetlo u sjencar
-
+        //postavi točkasto svijetlo u sceni u sjenčar
         sceneLight.position = GameObject.FindGameObjectWithTag("Light").transform.position;
         sceneLight.intensity = GameObject.FindGameObjectWithTag("Light").GetComponent<Light>().color;
 
         computeShader.SetVector("sceneLightPos", sceneLight.position);
         computeShader.SetVector("sceneLightIntensity", sceneLight.intensity);
 
-        //postavljanje bool
+        //postavljanje bool varijabli
         computeShader.SetBool("blackWhite", blackWhite);
         computeShader.SetBool("ambient", ambient);
         computeShader.SetBool("diffuse", diffuse);
@@ -101,7 +99,7 @@ public class RayTracingComputeShader : MonoBehaviour
 
         computeShader.SetInt("bounceNumber", bounceNumber);
 
-        //get info on spheres in the scene
+        //Pronađi sve sfere u sceni
 
         GameObject[] sfereUSceni = GameObject.FindGameObjectsWithTag("Sphere");
 
@@ -109,8 +107,7 @@ public class RayTracingComputeShader : MonoBehaviour
 
         int brojac = 0;
 
-        
-
+        //iteriraj po njima i izračunaj im bitne varijable i spremi ih u listu koja će se poslati u sjenčar
         foreach (GameObject sfera in sfereUSceni) {
 
             Sphere sferaGPU;
@@ -147,8 +144,8 @@ public class RayTracingComputeShader : MonoBehaviour
             
         }
 
-        //slanje na gpu
-
+        //slanje podataka sjenčaru
+        //izračun veličine buffera jedne sfere
         int Vector3Size = sizeof(float) * 3;
         int radiusSize = sizeof(float);
 
@@ -156,22 +153,23 @@ public class RayTracingComputeShader : MonoBehaviour
 
         int totalSize = Vector3Size + radiusSize + rtMaterialSize;
 
-        
-
-
-        
+        //Podatci se šalju pomoću computeBuffer strukture
         computeBuffer = new ComputeBuffer(sphereData.Length, totalSize);
         computeBuffer.SetData(sphereData);
         //uspjesno postavljeni podatci
         computeShader.SetBuffer(computeShader.FindKernel("CSMain"), "spheres", computeBuffer);
-        //computeShader.Dispatch(computeShader.FindKernel("SphereMain"), 1, 1, 1);
 
        
     }
 
+    //OnRenderImage se poziva pri renderiranju svake slike, ali prije prikazivanja na ekran
+    //Moguće je u funkciji u zadnjem trenu mijenjati izgled finalne slike, u ovom koraku će se uključiti sjenčar
     private void OnRenderImage(RenderTexture src, RenderTexture dest) {
+        //Sjenčar se može isključiti ili uključiti po želji
         if (turnOn) {
-            //postavljanje bool
+            //Sjenčaru se svaki frame šalju svi podaci za iscrtavanje dinamične scene
+            //Može se minjenjati pozicija kamere ili svijetla
+            //Ne podržava promjenu pozicije sfera
             computeShader.SetBool("blackWhite", blackWhite);
             computeShader.SetBool("ambient", ambient);
             computeShader.SetBool("diffuse", diffuse);
@@ -194,6 +192,8 @@ public class RayTracingComputeShader : MonoBehaviour
             computeShader.SetVector("cameraPos", Camera.main.transform.position);
             computeShader.SetMatrix("_CameraToWorldMatrix", Camera.main.cameraToWorldMatrix);
             computeShader.SetMatrix("_CameraInverseProjectionMatrix", Camera.main.projectionMatrix.inverse);
+
+            //ako ne postoji render tekstura stvori novi sa rezolucijom izvorne slike
             if (renderTexture == null) {
                 
                 renderTexture = new RenderTexture(src.width, src.height, src.depth);
@@ -201,34 +201,21 @@ public class RayTracingComputeShader : MonoBehaviour
                 renderTexture.enableRandomWrite = true;
                 renderTexture.Create();
 
-                
-                
-
             }
             
-
+            //funkcija koja kopira jednu teksturu na drugu
             Graphics.Blit(src, renderTexture);
 
-            
-
-            //postavljanje na shaderu
+        
+            //postavljanje na sjenčar
 
             computeShader.SetTexture(computeShader.FindKernel("CSMain"), "Result", renderTexture);
             computeShader.SetFloat("Resolution", renderTexture.width);
+            //Pokretanje sjenčara
             computeShader.Dispatch(computeShader.FindKernel("CSMain"), renderTexture.width / 8, renderTexture.height / 8, 1);
 
+            //Kopiraj dobivenu teksturu na ekran
             Graphics.Blit(renderTexture, dest);
-
-
-            //provjeri rayinfo od rayeva
-        
-
-            /*computeShader.SetTexture(0, "Result", src);
-            computeShader.SetFloat("Resolution", src.width);
-            computeShader.Dispatch(0, src.width / 8, src.height / 8, 1);
-
-            Graphics.Blit(src, dest);*/
-
 
         } else {
 
@@ -241,6 +228,7 @@ public class RayTracingComputeShader : MonoBehaviour
 
     }
 
+    //Nakon korištenja buffera treba ga otpustiti da se izbjegne memory leak
     private void OnDestroy() {
         computeBuffer.Release();
     }

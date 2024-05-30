@@ -1,60 +1,70 @@
-// Each #kernel tells which function to compile; you can have many kernels
+//Svaki kernel određuje koju funkciju treba kompajlirati pri pokretanju sjenčara, nama treba samo jedna funkcija
 #pragma kernel CSMain
 
 
-// Create a RenderTexture with enableRandomWrite flag and set it
-// with cs.SetTexture
+// Stvori novi RenderTexture varijablu koja će se vratiti kao rezultat ekrana
 RWTexture2D<float4> Result;
 
+//Većina varijabli se predaju sjenčaru iz RayTracingComputeShader.cs skripte pomoću set funkcija
+
+//rezolucija ekrana
 float Resolution;
 
+//pozicija kamere iz scene
 float3 cameraPos;
 
+//intenzitet ambijentalnog osvjetljenja
 float4 ambientLight;
 
 static const float PI = 3.14159265f;
 
+//pozicija i intenzitet točkastog svijetla u sceni, program podržava samo jedan izvor osvjetljenja
 float3 sceneLightPos;
 float4 sceneLightIntensity;
 
+//matrice vezane uz kameru u sceni, program podržava samo jednu kameru. Ove matrice su bitne za izračun zrake kroz piksel
 float4x4 _CameraToWorldMatrix;
 float4x4 _CameraInverseProjectionMatrix;
 
+//struktura koja opisuje materijal sfere, svi koeficijenti se mogu podešavati u sceni kroz skriptu RayTracingMaterialSettings.cs
 struct RayTracingMaterial {
-	float4 ambientColor;
-	float4 diffuseColor;
-	float4 specularColor;
-	float specularFactor;
+	float4 ambientColor; //ambijentalni koeficijent
+	float4 diffuseColor; //difuzni koeficijent
+	float4 specularColor; //spekularni koeficijent
+	float specularFactor; //spekularni faktor
 	float indeksLoma;
-	float reflectionCoef;
-	float refractionCoef;
+	float reflectionCoef; //koeficijent refleksije
+	float refractionCoef; //koeficijent refrakcije
 };
 
+//struktura koja opisuje sferu
 struct Sphere {
     float radius;
     float3 position;
 	RayTracingMaterial material;
 };
 
+//struktura koja opisuje informacije vezane uz presjek zrake i sfere u sceni
 struct HitInfo {
     bool didHit;
-	float distance;
+	float distance; //udaljenost točke presjeka, bitno za određivanje ispravne (prve) točke presjeka
 	float3 hitPoint;
-	float3 normal;
+	float3 normal; //normala u tocki presjeka
 	RayTracingMaterial material;
-	Sphere sphere;
+	Sphere sphere; //pogođena sfera, sluzi za izuzimanje te sfere pri provjeri kolizije
 };
 
+//buffer koji prima sfere iz scene i sprema ih za provjeru presjeka
 RWStructuredBuffer<Sphere> spheres;
 
-
-
+//struktura koja opisuje zraku
 struct Ray {
-    float3 origin;
-    float3 direction;
-	float3 energy;
+    float3 origin; //hvatište zrake
+    float3 direction; //smjer zrake
+	float3 energy; //"energija" zrake koja se gubi pri svakoj refleksiji ili refrakciji ovisno o koeficijnetima
 };
 
+//funkcija koja izračunava zraku sa hvatištem u poziciji kamere i koja ide kroz piksel na ekranu
 Ray CreateCameraRay(float2 uv) 
 {
 	Ray newRay;
@@ -64,12 +74,12 @@ Ray CreateCameraRay(float2 uv)
     direction = mul(_CameraToWorldMatrix, float4(direction, 0.0f)).xyz;
     direction = normalize(direction);
 	newRay.direction = direction;
-	newRay.energy = (1.0, 1.0, 1.0);
+	newRay.energy = float3(1.0, 1.0, 1.0);
     
     return newRay;
 }
 
-
+//postavke sjenčara
 int pogodioPozadinu = 0;
 int blackWhite;
 int ambient;
@@ -84,32 +94,29 @@ int blackBackground;
 int bounceNumber;
 
 
-
-
-
-
-//RWStructuredBuffer<Ray> generatedRays;
-
+//testiranje presjeka izmedu sfera u sceni i izračunate zrake
 HitInfo RaySphereIntersection(Ray ray, Sphere sphere) {
+	//stvaranje praznog HitInfo
     HitInfo hitInfo = (HitInfo)0;
     float3 sphereCentre = sphere.position;
     float sphereRadius = sphere.radius;
     float3 offsetRayOrigin = ray.origin - sphereCentre;
-	// From the equation: sqrLength(rayOrigin + rayDir * dst) = radius^2
-	// Solving for dst results in a quadratic equation with coefficients:
-	float a = dot(ray.direction, ray.direction); // a = 1 (assuming unit vector)
+	//Iz jednadžbe: sqrLength(rayOrigin + rayDir * dst) = radius^2
+	//Rješavanje kvadratne jednadžbe
+	float a = dot(ray.direction, ray.direction); //smjer zrake mora biti normaliziran
 	float b = 2 * dot(offsetRayOrigin, ray.direction);
 	float c = dot(offsetRayOrigin, offsetRayOrigin) - sphereRadius * sphereRadius;
-	// Quadratic discriminant
+	//Računanje diskriminante
 	float discriminant = b * b - 4 * a * c; 
 
-	// No solution when d < 0 (ray misses sphere)
+	//ako je diskriminanta < 0, zraka nije pogodila sferu
 	if (discriminant >= 0) {
-	    // Distance to nearest intersection point (from quadratic formula)
+	    //Udaljenost do najbliže točke presjeka
 		float distance = (-b - sqrt(discriminant)) / (2 * a);
 
-		// Ignore intersections that occur behind the ray
+		//Udaljenost mora biti veća od 0, ignoriramo presjeke iza hvatišta zrake
 		if (distance > 0) {
+			//pripisivanje vrijednosti HitInfo
 			hitInfo.didHit = true;
 			hitInfo.distance = distance;
 			hitInfo.hitPoint = ray.origin + ray.direction * distance;
@@ -124,9 +131,10 @@ HitInfo RaySphereIntersection(Ray ray, Sphere sphere) {
     return hitInfo;
 }
 
+//Izračun kolizije zrake sa scenom
 HitInfo CalculateRayCollision(Ray ray, HitInfo hitInfoPrevious) {
 	HitInfo closestHit = (HitInfo)0;
-	// We haven't hit anything yet, so 'closest' hit is infinitely far away
+	//Nismo još pogodili scenu pa je najbliži pogodak u beskonačnosti
 	closestHit.distance = 1.#INF;
 
 	uint brojSfera;
@@ -134,12 +142,12 @@ HitInfo CalculateRayCollision(Ray ray, HitInfo hitInfoPrevious) {
 
 	spheres.GetDimensions(brojSfera, stride);
 
-	// Raycast against all spheres and keep info about the closest hit
-	for (int i = 0; i < brojSfera; i++)
+	//Provjeri presjek sa svim sferama u sceni
+	for (uint i = 0; i < brojSfera; i++)
 	{
 		Sphere trenutnaSfera = spheres[i];
 		if (hitInfoPrevious.distance != 0) {
-			//postoji i ignoriraj ako je ista sfera
+			//provjeri je li presjek vezan uz istu sferu, ako da ignoriraj presjek -> inače dovodi do ruznih titranja
 			if (trenutnaSfera.position.x == hitInfoPrevious.sphere.position.x && trenutnaSfera.position.y == hitInfoPrevious.sphere.position.y && trenutnaSfera.position.z == hitInfoPrevious.sphere.position.z) {
 				continue;
 			}
@@ -156,6 +164,7 @@ HitInfo CalculateRayCollision(Ray ray, HitInfo hitInfoPrevious) {
 	return closestHit;
 }
 
+//Izracun reflektiranog vektora
 float3 getReflectedVector(Ray ray, float3 normala) {
 	float3 U = -ray.direction;
 	float3 N = normala;
@@ -163,8 +172,10 @@ float3 getReflectedVector(Ray ray, float3 normala) {
 	return reflektiraniVektor;
 }
 
+//Jednostavan izračun sjene u točki
 int Shading(HitInfo hitInfo) {
 
+	//SHadow feeler
 	Ray shaderRay;
 
 	shaderRay.origin = hitInfo.hitPoint;
@@ -172,7 +183,8 @@ int Shading(HitInfo hitInfo) {
 	shaderRay.direction = sceneLightPos - hitInfo.hitPoint;
 	shaderRay.direction = normalize(shaderRay.direction);
 
-	HitInfo shaderRayHitInfo = CalculateRayCollision(shaderRay, (HitInfo)0);
+	//ako zraka sjene ima presjek, vrati 1, inače vrati 0
+	HitInfo shaderRayHitInfo = CalculateRayCollision(shaderRay, hitInfo);
 
 	if (shaderRayHitInfo.didHit) {
 		//ima sjenu
@@ -183,7 +195,9 @@ int Shading(HitInfo hitInfo) {
 
 }
 
+//Ambijentalna komponenta Phongovog osvjetljenja
 float3 ambientLighting(HitInfo hitInfo) {
+	//Boja materijala * intenzitet ambijentalnog svijetla
 	float3 ambijentalniDoprinos = float3(
 					hitInfo.material.ambientColor.x * ambientLight.x, 
 					hitInfo.material.ambientColor.y * ambientLight.y, 
@@ -193,8 +207,10 @@ float3 ambientLighting(HitInfo hitInfo) {
 	return ambijentalniDoprinos;
 }
 
+//Difuzna komponenta
 float3 diffuseLighting(HitInfo hitInfo) {
 
+	//provjeri sjene
 	if (shadows) {
 		int shading = Shading(hitInfo);
 
@@ -203,7 +219,7 @@ float3 diffuseLighting(HitInfo hitInfo) {
 		}
 	}
 	
-
+	//sve po formuli
 	float3 L = sceneLightPos - hitInfo.hitPoint;
 	L = normalize(L);
 
@@ -216,8 +232,10 @@ float3 diffuseLighting(HitInfo hitInfo) {
 
 }
 
+//spekularna komponenta
 float3 specularLighting(HitInfo hitInfo) {
 
+	//provjeri sjenu
 	if (shadows) {
 		int shading = Shading(hitInfo);
 
@@ -226,7 +244,7 @@ float3 specularLighting(HitInfo hitInfo) {
 		}
 	}
 
-
+	//formula
 	float3 L = sceneLightPos - hitInfo.hitPoint;
 	L = normalize(L);
 
@@ -249,7 +267,10 @@ float3 specularLighting(HitInfo hitInfo) {
 
 }
 
+//Blinn-Phong, mijenja izračun spekularne komponente sa halfway vektorom
 float3 blinnPhongSpecularLighting(HitInfo hitInfo) {
+
+	//provjeri sjenu
 	if (shadows) {
 		int shading = Shading(hitInfo);
 
@@ -278,7 +299,7 @@ float3 blinnPhongSpecularLighting(HitInfo hitInfo) {
 	return spekularniDoprinos;
 }
 
-
+//Izračun sveukupnog Phongovog osvjetljenja
 float3 PhongShading(Ray ray, HitInfo hitInfoPrevious) {
 
 	float3 phongBoja = float3(0.0, 0.0, 0.0);
@@ -317,8 +338,10 @@ float3 PhongShading(Ray ray, HitInfo hitInfoPrevious) {
 		}
 		
 	} else if (blackBackground || blackWhite) {
+		//ako je crna pozadina flag uključen ili blackWhite vrati crnu boju
 		return float3(0.0, 0.0, 0.0);
 	} else {
+		//Inače vrati boju pozadine iz Unity editora
 		pogodioPozadinu = 1;
 	}
 
@@ -326,6 +349,7 @@ float3 PhongShading(Ray ray, HitInfo hitInfoPrevious) {
 
 }
 
+//izračun reflektirane zrake
 Ray CalculateReflectedRay(Ray ray, HitInfo hitInfo, float reflectionCoef) {
 
 	Ray reflectedRay = ray;
@@ -350,19 +374,7 @@ Ray CalculateReflectedRay(Ray ray, HitInfo hitInfo, float reflectionCoef) {
 
 }
 
-float3 calcRefractDir(Ray ray, HitInfo hitInfo, float refractionCoef) {
-
-	float cosi = dot(ray.direction, hitInfo.normal); 
-    float n1 = 1, n2 = refractionCoef; 
-    float3 N = hitInfo.normal; 
-    if (cosi < 0) { cosi = -cosi; } else { n1 = n2; n2 = 1; N = -N; } 
-    float n = hitInfo.material.indeksLoma; 
-    float k = 1 - n * n * (1 - cosi * cosi);     
-    
-    return k < 0? float3(0.0, 0.0, 0.0) : n * ray.direction + N * n * cosi - N * sqrt(k); 
-
-}
-
+//Izračun refraktirane zrake
 Ray CalculateRefractedRay(Ray ray, HitInfo hitInfo, float refractionCoef) {
 	Ray refractedRay = ray;
 	float3 U = ray.origin - hitInfo.hitPoint;
@@ -380,7 +392,6 @@ Ray CalculateRefractedRay(Ray ray, HitInfo hitInfo, float refractionCoef) {
 	a = (-2 * hitInfo.material.indeksLoma * cosA + sqrt(D)) / 2;
 
 	float3 R = -a * hitInfo.normal - hitInfo.material.indeksLoma * U;
-	//float3 R = calcRefractDir(ray, hitInfo, refractionCoef);
 	R = normalize(R);
 
 	refractedRay.origin = hitInfo.hitPoint;
@@ -392,21 +403,21 @@ Ray CalculateRefractedRay(Ray ray, HitInfo hitInfo, float refractionCoef) {
 }
 
 
-
-
-
+//funkcija za praćenje zrake
 float3 TraceRay(Ray ray, int dubina, int type) {
 
 	//type = 0 -> reflection
 	//type = 1 -> refraction
 	float3 tracedColor = float3(0.0, 0.0, 0.0);
+	//Izračun presjeka zrake s scenom
 	HitInfo hitInfo = CalculateRayCollision(ray, (HitInfo)0);
+	//Prijašnji presjek sa scenom, treba nam za ispravni izračun presjeka sa scenom
 	HitInfo hitInfoPrevious;
 
 	
 
 	if (type == 0 && hitInfo.didHit) {
-		//za prvu kuglu koju je pogodio sacuvaj koeficijent
+		//za prvu kuglu koju je pogodio sacuvaj koeficijent, taj koeficijent će se uvijek davati funkciji za refleksiju
 		float reflectionCoefMat = hitInfo.material.reflectionCoef;
 		//izracunaj reflektiranu zraku od zadane u funkciji
 		Ray reflectedRay = CalculateReflectedRay(ray, hitInfo, reflectionCoefMat);
@@ -414,7 +425,8 @@ float3 TraceRay(Ray ray, int dubina, int type) {
 		//sada posalji reflektiranu zraku u loop sa dubinom i traceaj
 
 		for (int bounceIndex = 0; bounceIndex < dubina; bounceIndex++) {
-
+			
+			//sačuvaj prijašnji hiTInfo
 			hitInfoPrevious = hitInfo;
 	
 			hitInfo = CalculateRayCollision(reflectedRay, hitInfoPrevious);
@@ -423,6 +435,7 @@ float3 TraceRay(Ray ray, int dubina, int type) {
 				//izracunaj phong za tu tocku i idi dalje
 				float3 phong = PhongShading(reflectedRay, hitInfoPrevious);
 
+				//energija zrake se smanjuje za reflekcijski koeficijent svakim izračunom
 				tracedColor += phong * reflectedRay.energy;
 
 				//reflektiraj zraku opet
@@ -432,44 +445,36 @@ float3 TraceRay(Ray ray, int dubina, int type) {
 				return tracedColor;
 			}
 			
-
 		}
 
 		
-
-		} else if (type == 1 && hitInfo.didHit) {
-			//refrakcijska zraka
-			float refractionCoefMat = hitInfo.material.refractionCoef;
-			Ray refractedRay = CalculateRefractedRay(ray, hitInfo, refractionCoefMat);
+	} else if (type == 1 && hitInfo.didHit) {
+		//refrakcijska zraka
+		float refractionCoefMat = hitInfo.material.refractionCoef;
+		Ray refractedRay = CalculateRefractedRay(ray, hitInfo, refractionCoefMat);
 			
 
-			//loop
+		//sada posalji refraktiranu zraku u loop sa dubinom i traceaj
 
-			for (int bounceIndex = 0; bounceIndex < dubina; bounceIndex++) {
-				
-				hitInfoPrevious = hitInfo;
+		for (int bounceIndex = 0; bounceIndex < dubina; bounceIndex++) {
+			//Sačuvaj prijašnji hitInfo
+			hitInfoPrevious = hitInfo;
 
-				//hitInfo = CalculateRayCollision(refractedRay);
-				hitInfo = CalculateRayCollision(refractedRay, hitInfoPrevious);
+			hitInfo = CalculateRayCollision(refractedRay, hitInfoPrevious);
 
-				if (hitInfo.didHit && length(refractedRay.energy) > 0.1) {
-					//izracunaj phong za tu tocku i idi dalje
-					float3 phong = PhongShading(refractedRay, hitInfoPrevious);
+			if (hitInfo.didHit && length(refractedRay.energy) > 0.1) {
+				//izracunaj phong za tu tocku i idi dalje
+				float3 phong = PhongShading(refractedRay, hitInfoPrevious);
 
-					tracedColor += phong * refractedRay.energy;
-					//tracedColor = float3(1.0, 0.0, 0.0);
+				tracedColor += phong * refractedRay.energy;
 
-					//reflektiraj zraku opet 
+				//refraktiraj zraku opet 
 
-					refractedRay = CalculateRefractedRay(refractedRay, hitInfo, hitInfo.material.refractionCoef);
-				} else {
-					return tracedColor;
+				refractedRay = CalculateRefractedRay(refractedRay, hitInfo, hitInfo.material.refractionCoef);
+			} else {
+				return tracedColor;
 			}
 		}
-
-		
-
-
 	}
 
 	return tracedColor;
@@ -478,7 +483,7 @@ float3 TraceRay(Ray ray, int dubina, int type) {
 
 }
 
-
+//Broj paralelnih grupa dretvi za program, koristi se jedna dretva po pikselu
 [numthreads(8,8,1)]
 void CSMain (uint3 id : SV_DispatchThreadID)
 {
@@ -486,28 +491,24 @@ void CSMain (uint3 id : SV_DispatchThreadID)
 
 	float3 sveukupnaBoja = float3(0.0, 0.0, 0.0);
 
-
-	//raytracing Dio
-    //izracunaj zraku iz piksela
+    //izracunaj zraku kroz piksela
 	uint width, height;
     Result.GetDimensions(width, height);
+	//Izračun pozicije piksela na ekranu
 	float2 uv = float2((id.xy + float2(0.5f, 0.5f)) / float2(width, height) * 2.0f - 1.0f);
 
     Ray trenutniRay = CreateCameraRay(uv);
-    //trenutniRay.origin = cameraPos;
-    //izracunaj smjer zrake
-    //trenutniRay.direction = Result[id.xy].xyz - cameraPos;
 
-	//phong shading
+	//Doprinos Phong shadinga
 	float3 phongColor = PhongShading(trenutniRay, (HitInfo)0);
 	sveukupnaBoja += phongColor;
 
-	//ray tracing zraka dio
+	//Ako je uključen dio za praćenje zrake, onda ga dodaj konačnom izračunu
 	if (reflection) {
-		//izracunaj reflektiranu zraku od originalne
 		
 		float3 tracedReflectionColor = TraceRay(trenutniRay, bounceNumber, 0);
 		sveukupnaBoja += tracedReflectionColor;
+
 	}
 
 	if (refraction) {
@@ -517,20 +518,12 @@ void CSMain (uint3 id : SV_DispatchThreadID)
 
 	}
 	
-
+	//Ako je zraka pogodila pozadinu onda vrati originalnu Unity pozadinu
 	if (pogodioPozadinu == 1) {
 		Result[id.xy] = float4(Result[id.xy].x, Result[id.xy].y, Result[id.xy].z, 0.0);
 		
 	} else{
 		Result[id.xy] = float4(sveukupnaBoja.x, sveukupnaBoja.y, sveukupnaBoja.z, 0.0);
 	}
-		
-	
-
-	
-	
-
-    //Result[id.xy] = float4(Result[id.xy].x, Result[id.xy].y, Result[id.xy].z, 0.0);
-    //Result[id.xy] = Result[id.xy];
 }
 
