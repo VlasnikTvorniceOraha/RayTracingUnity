@@ -330,12 +330,13 @@ MonoBehaviour:
   ambient: 1
   diffuse: 0
   specular: 0
-  reflection: 0
-  refraction: 1
+  reflection: 1
+  refraction: 0
   shadows: 0
   blinnPhong: 0
   blackBackground: 1
-  bounceNumber: 1
+  bounceNumber: 2
+  minimalIntensity: 0
   ambientColor: {r: 1, g: 1, b: 1, a: 0}
 --- !u!114 &963194230
 MonoBehaviour:

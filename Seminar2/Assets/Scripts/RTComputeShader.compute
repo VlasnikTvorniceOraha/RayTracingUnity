@@ -91,7 +91,9 @@ int shadows;
 int blinnPhong;
 int blackBackground;
 
+
 int bounceNumber;
+float minimalIntensity;
 
 
 //testiranje presjeka izmedu sfera u sceni i izračunate zrake
@@ -356,7 +358,6 @@ Ray CalculateReflectedRay(Ray ray, HitInfo hitInfo, float reflectionCoef) {
 	float3 originRef = hitInfo.hitPoint;
 
 	reflectedRay.origin = originRef;
-	reflectedRay.energy = float3(1.0, 1.0, 1.0);
 
 	float3 U = -ray.direction;
 	U = normalize(U);
@@ -431,7 +432,7 @@ float3 TraceRay(Ray ray, int dubina, int type) {
 	
 			hitInfo = CalculateRayCollision(reflectedRay, hitInfoPrevious);
 
-			if (hitInfo.didHit) {
+			if (hitInfo.didHit && reflectedRay.energy.x > minimalIntensity) {
 				//izracunaj phong za tu tocku i idi dalje
 				float3 phong = PhongShading(reflectedRay, hitInfoPrevious);
 
@@ -439,7 +440,7 @@ float3 TraceRay(Ray ray, int dubina, int type) {
 				tracedColor += phong * reflectedRay.energy;
 
 				//reflektiraj zraku opet
-
+				
 				reflectedRay = CalculateReflectedRay(reflectedRay, hitInfo, reflectionCoefMat);
 			} else {
 				return tracedColor;
@@ -462,7 +463,7 @@ float3 TraceRay(Ray ray, int dubina, int type) {
 
 			hitInfo = CalculateRayCollision(refractedRay, hitInfoPrevious);
 
-			if (hitInfo.didHit && length(refractedRay.energy) > 0.1) {
+			if (hitInfo.didHit && length(refractedRay.energy) > minimalIntensity) {
 				//izracunaj phong za tu tocku i idi dalje
 				float3 phong = PhongShading(refractedRay, hitInfoPrevious);
 

@@ -24,6 +24,8 @@ public class RayTracingComputeShader : MonoBehaviour
 
     public int bounceNumber;
 
+    public float minimalIntensity;
+
     //struct RayTracingMaterial {
       //  public Color colour;
         //public float reflectionCoef;
@@ -98,6 +100,8 @@ public class RayTracingComputeShader : MonoBehaviour
         computeShader.SetBool("blackBackground", blackBackground);
 
         computeShader.SetInt("bounceNumber", bounceNumber);
+
+        computeShader.SetFloat("minimalIntensity", minimalIntensity);
 
         //Pronađi sve sfere u sceni
 
@@ -181,6 +185,8 @@ public class RayTracingComputeShader : MonoBehaviour
             computeShader.SetBool("blackBackground", blackBackground);
 
             computeShader.SetInt("bounceNumber", bounceNumber);
+
+            computeShader.SetFloat("minimalIntensity", minimalIntensity);
 
             sceneLight.position = GameObject.FindGameObjectWithTag("Light").transform.position;
             sceneLight.intensity = GameObject.FindGameObjectWithTag("Light").GetComponent<Light>().color;
