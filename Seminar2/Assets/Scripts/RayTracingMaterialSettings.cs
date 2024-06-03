@@ -5,10 +5,10 @@ using UnityEngine;
 public class RayTracingMaterialSettings : MonoBehaviour
 {
 
-    public Color colour;
-    public Color ambientColor;
-    public Color diffuseColor;
-    public Color specularColor;
+    [HideInInspector] public Color colour;
+    [HideInInspector] public Color ambientColor;
+    [HideInInspector] public Color diffuseColor;
+    [HideInInspector] public Color specularColor;
     public float specularFactor;
     public float indeksLoma;
     public float reflectionCoef;
